@@ -4,8 +4,8 @@ CFLAGS = -Wall -MMD
 LDFLAGS = -O
 LDLIBS = -lm -lpthread
 
-PROGRAM = lab2
-OBJEKTI = lab2.o signali.o datoteke.o
+PROGRAM = lab3
+OBJEKTI = lab3.o signali.o datoteke.o
 
 STATUS = status.txt
 OBRADA = obrada.txt

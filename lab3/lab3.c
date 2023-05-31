@@ -15,13 +15,16 @@ char *dat_status, *dat_obrada, *dat_mreza;
 int broj = 0;
 int nije_kraj = 1;
 
+// vrijeme
+time_t pocetak;
+
 // varijable za broj dretvi
-int broj_dretvi = 0;
+int broj_dretvi = 2;	// inicijalno
 int postavljeni_broj_dretvi = 0;
 
 // monitori i redovi
-pthread_mutex_t m;  //monitor
-pthread_cond_t red; //red uvjeta
+pthread_mutex_t m;  // monitor
+pthread_t nebitno;	// zanemaruju se opisnici radnih dretvi
 
 
 /* funkcije koje rade dretve */
@@ -30,9 +33,11 @@ void *mreza(void *);
 
 int main(int argc, char *argv[])
 {
-	// inicijalizacija monitora i reda
+	// inicijalizacija monitora
 	pthread_mutex_init (&m, NULL);
-	pthread_cond_init (&red, NULL);
+
+	// vrijeme pocetka
+	pocetak = time(NULL);
 
 	if (argc < 4) {
 		fprintf(stderr, "Koristenje: %s <status-datoteka> "
@@ -56,13 +61,24 @@ int main(int argc, char *argv[])
 	zapisi_status(0); //radim
 	printf("krecem s radom, PID=%ld, zadnji broj=%d\n", (long) getpid(), broj);
 
-	/* stvori dretve: radnu i mreznu */
-	pthread_t radna_o, mrezna_o;
-	if(
-		pthread_create(&radna_o, NULL, obrada, NULL) ||
-		pthread_create(&mrezna_o, NULL, mreza, NULL)
-	) {
-		printf("Ne mogu stvoriti neku od dretvi.\n");
+	/* stvori dretve: mreznu, pocetni broj radnih */
+	pthread_t mrezna_o;
+	int greska = 0;
+
+	pthread_mutex_lock(&m);
+
+	for(; postavljeni_broj_dretvi < broj_dretvi; postavljeni_broj_dretvi++) {
+		// (opisnik, opcije, funkcija, argument)
+		// ne pamti se opisnik (ide u varijablu nebitno)
+		greska += pthread_create(&nebitno, NULL, obrada, NULL);
+	}
+	// mrezna dretva
+	greska += pthread_create(&mrezna_o, NULL, mreza, NULL);
+
+	pthread_mutex_unlock(&m);
+
+	if(greska) {
+		printf("Ne mogu stvoriti neku dretvu.\n");
         exit(1);
 	}
 	
@@ -77,36 +93,19 @@ int main(int argc, char *argv[])
 			postavljeni_broj_dretvi = konzola_br;
 			for(; broj_dretvi < postavljeni_broj_dretvi; broj_dretvi++) {
 				// (opisnik, opcije, funkcija, argument)
-				pthread_create(NULL, NULL, obrada, NULL);
+				// ne pamti se opisnik
+				pthread_create(&nebitno, NULL, obrada, NULL);
 			}
 			pthread_mutex_unlock(&m);
 		}
 	}
-
-	printf("Cekam kraj obrade.\n");
-	//cekaj na kraj dretve obrada, ali ne i one druge mrezne
-	pthread_join(radna_o, NULL);
 
 	return 0;
 }
 
 
 void *obrada(void *p)
-{
-	int broj, x;
-
-	for (int i = 0; i < 100; i++) {
-		// moguća izvanredna promjena preko mreže ili konzole
-		// pa je potrebno pročitati zadnji broj
-		broj = pronadji_zadnji_broj();
-		printf("Pronasao sam broj %d\n", broj);
-		broj = (int) sqrt(broj);
-		broj++;
-		x = broj * broj;
-		dodaj_broj(x);
-		sleep(5);
-	}
-
+{	
 	pthread_mutex_lock(&m);
 
 	// maksimalna trajnost radne dretve je 100 obrada
@@ -115,12 +114,24 @@ void *obrada(void *p)
 		if(broj_dretvi > postavljeni_broj_dretvi) {
 			broj_dretvi --;
 			pthread_mutex_unlock(&m);
-			pthread_exit();
+			pthread_exit(NULL);
 		}
 
-		moj_broj = pronadji_zadnji_broj();
-		// status vs. obrada
+		int moj_broj = broj;
+		broj++;
+
+		pthread_mutex_unlock(&m);
+
+		moj_broj = moj_broj * moj_broj;
+		// simulacija obrade
+		sleep(5);
+
+		pthread_mutex_lock(&m);
+		dodaj_broj(moj_broj);
+		printf("unesen broj %d, vrijeme = %d\n", moj_broj, (int)(time(NULL) - pocetak));		
 	}
+
+	pthread_mutex_unlock(&m);
 
 	return NULL;
 }
@@ -132,10 +143,15 @@ void *mreza(void *p)
 	// ako je procitano > 0 onda ga postavi u broj
 	int cijev_br;
 	for(int i=0; i<10; i++) {
+
 		cijev_br = dohvati_iz_cijevi();
 		if(cijev_br != -1) {
-			dodaj_broj(cijev_br);
-			printf("Dodao broj %d u datoreku obrada.txt\n", cijev_br);
+			// ovako dretva utječe na zajednički broj
+			pthread_mutex_lock(&m);
+			broj = cijev_br;
+			pthread_mutex_unlock(&m);
+
+			printf("mreža : broj = %d\n", cijev_br);
 		}
 	}
 
